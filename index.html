@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiTrackList.net</title>
+    
+    <!-- 1. TAILWIND CSS: Esta librería nos permite dar estilos (colores, tamaños) usando clases directamente en el HTML -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Aquí configuramos los colores personalizados al estilo MyAnimeList (MAL)
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        mal: {
+                            blue: '#2e51a2',      // Azul clásico de la barra superior
+                            darkblue: '#1c3166',  // Azul más oscuro para botones y fondos secundarios
+                            bg: '#111111',        // Fondo general (casi negro)
+                            panel: '#1e1e1e',     // Gris muy oscuro para las "cajas" de contenido
+                            border: '#333333',    // Color de las líneas separadoras
+                            text: '#ababab',      // Texto secundario (gris claro)
+                            textlight: '#e5e5e5'  // Texto principal (casi blanco)
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Verdana', 'Arial', 'sans-serif'], // Tipografía clásica de foros y webs de los 2000s
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- 2. ICONOS: Usamos Lucide Icons para las estrellitas, botones de cerrar, etc. -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- 3. REACT: La base de nuestra aplicación. Nos permite crear la web por "bloques" o "componentes" -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- ESTILOS BÁSICOS EXTRA -->
+    <style>
+        body { background-color: #111111; color: #e5e5e5; font-family: Verdana, Arial, Helvetica, sans-serif; }
+        
+        /* Modifica la barra de desplazamiento (Scrollbar) para que sea oscura */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #111111; }
+        ::-webkit-scrollbar-thumb { background: #333333; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #2e51a2; }
+        
+        /* Animación suave al abrir ventanas */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .animate-fade-in { animation: fadeIn 0.2s ease-out forwards; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Aquí es donde React "inyectará" toda nuestra aplicación -->
+    <div id="root" class="flex-1 flex flex-col"></div>
+
+    <script type="text/babel">
+        // Extraemos las herramientas que usaremos de React
+        // useState = sirve para guardar datos que cambian (como el texto de un buscador)
+        // useEffect = sirve para ejecutar código cuando la página carga (ej. buscar los datos guardados)
+        const { useState, useEffect } = React;
+
+        /* =========================================================================
+           MÓDULO 1: CONFIGURACIÓN Y CONSTANTES
+           Aquí definimos todas las listas desplegables y opciones de la app.
+           Si quieres añadir una nueva categoría, hazlo aquí.
+           ========================================================================= */
+
+        const CATEGORIES = [
+            { id: 'anime', name: 'Anime' },
+            { id: 'manga', name: 'Manga' },
+            { id: 'videojuegos', name: 'Videojuegos' },
+            { id: 'peliculas', name: 'Películas' },
+            { id: 'series', name: 'Series' },
+            { id: 'libros', name: 'Libros' },
+            { id: 'novelas_ligeras', name: 'Novelas Ligeras' },
+            { id: 'comics', name: 'Cómics' }
+        ];
+
+        const STATUSES = [
+            { id: 'pendiente', name: 'Pendiente', color: 'bg-[#5a5a5a]', textColor: 'text-[#5a5a5a]' },
+            { id: 'progreso', name: 'En Progreso', color: 'bg-[#2db039]', textColor: 'text-[#2db039]' }, // Verde MAL
+            { id: 'completado', name: 'Completado', color: 'bg-[#26448f]', textColor: 'text-[#26448f]' }, // Azul MAL
+            { id: 'pausa', name: 'En Pausa', color: 'bg-[#f1c83e]', textColor: 'text-[#f1c83e]' },       // Amarillo MAL
+            { id: 'abandonado', name: 'Abandonado', color: 'bg-[#a12f31]', textColor: 'text-[#a12f31]' } // Rojo MAL
+        ];
+
+        // Estos son los campos especiales que aparecen al seleccionar cada categoría.
+        const CATEGORY_FIELDS = {
+            videojuegos: [
+                { key: 'platform', label: 'Plataforma', type: 'text', placeholder: 'PC, PlayStation, Xbox...' },
+                { key: 'hours', label: 'Horas jugadas', type: 'number', step: '0.1', placeholder: 'Ej. 45.5' },
+                { key: 'developer', label: 'Desarrolladora', type: 'text', placeholder: 'FromSoftware, Nintendo...' },
+                { key: 'genre', label: 'Género principal', type: 'text', placeholder: 'RPG, Acción...' }
+            ],
+            peliculas: [
+                { key: 'duration', label: 'Duración (Min o HH:MM)', type: 'text', placeholder: 'Ej. 120 o 2:00' },
+                { key: 'director', label: 'Director / Dirección', type: 'text', placeholder: 'Ej. Christopher Nolan' },
+                { key: 'platform', label: 'Dónde se vio', type: 'text', placeholder: 'Netflix, Cine...' },
+                { key: 'year', label: 'Año de estreno', type: 'number', placeholder: 'Ej. 2024' }
+            ],
+            series: [
+                { key: 'season', label: 'Temporada actual', type: 'text', placeholder: 'Ej. Temporada 2' },
+                { key: 'episode', label: 'Episodio actual', type: 'number', placeholder: 'Ej. 8' },
+                { key: 'totalEpisodes', label: 'Total episodios', type: 'number', placeholder: 'Ej. 12' },
+                { key: 'platform', label: 'Plataforma', type: 'text', placeholder: 'Max, Netflix...' },
+                { key: 'network', label: 'Cadena / Productora', type: 'text', placeholder: 'HBO, AMC...' }
+            ],
+            libros: [
+                { key: 'author', label: 'Autor / Autora', type: 'text', placeholder: 'Nombre del autor' },
+                { key: 'pages', label: 'Páginas leídas', type: 'number', placeholder: 'Ej. 150' },
+                { key: 'totalPages', label: 'Total de páginas', type: 'number', placeholder: 'Ej. 300' },
+                { key: 'format', label: 'Formato', type: 'text', placeholder: 'Físico, Kindle, Audiobook...' },
+                { key: 'publisher', label: 'Editorial', type: 'text', placeholder: 'Nombre' }
+            ],
+            novelas_ligeras: [
+                { key: 'author', label: 'Autor e Ilustrador', type: 'text', placeholder: 'Escritor / Dibujante' },
+                { key: 'volumes', label: 'Vols/Caps leídos', type: 'number', placeholder: 'Ej. 4' },
+                { key: 'totalVolumes', label: 'Total de Vols/Caps', type: 'number', placeholder: 'Ej. 10' },
+                { key: 'format', label: 'Formato', type: 'text', placeholder: 'Físico, Web...' },
+                { key: 'language', label: 'Traducción', type: 'text', placeholder: 'Español, Inglés...' }
+            ],
+            manga: [
+                { key: 'author', label: 'Mangaka / Autor', type: 'text', placeholder: 'Nombre' },
+                { key: 'chapters', label: 'Caps/Vols leídos', type: 'number', placeholder: 'Ej. 50' },
+                { key: 'totalChapters', label: 'Total Caps/Vols', type: 'number', placeholder: 'Ej. 120' },
+                { key: 'publishStatus', label: 'Estado publicación', type: 'text', placeholder: 'En emisión...' },
+                { key: 'publisher', label: 'Editorial / Revista', type: 'text', placeholder: 'Shueisha...' }
+            ],
+            anime: [
+                { key: 'episode', label: 'Episodios vistos', type: 'number', placeholder: 'Ej. 12' },
+                { key: 'totalEpisodes', label: 'Total episodios', type: 'number', placeholder: 'Ej. 24' },
+                { key: 'season', label: 'Temporada / Año', type: 'text', placeholder: 'Ej. Primavera 2024' },
+                { key: 'studio', label: 'Estudio animación', type: 'text', placeholder: 'MAPPA, Ufotable...' },
+                { key: 'format', label: 'Formato de emisión', type: 'text', placeholder: 'TV, Película, OVA...' }
+            ],
+            comics: [
+                { key: 'authors', label: 'Guionista y Dibujante', type: 'text', placeholder: 'Nombres' },
+                { key: 'format', label: 'Formato', type: 'text', placeholder: 'Grapa, TPB, Tomo...' },
+                { key: 'issues', label: 'Números leídos', type: 'number', placeholder: 'Ej. 5' },
+                { key: 'totalIssues', label: 'Total números', type: 'number', placeholder: 'Ej. 10' },
+                { key: 'publisher', label: 'Editorial / Universo', type: 'text', placeholder: 'Marvel, DC, Image...' }
+            ]
+        };
+
+        /* =========================================================================
+           MÓDULO 2: DATOS DE EJEMPLO
+           Estos datos solo se cargan la primera vez que abres la app sin haber
+           iniciado sesión, para que la pantalla no se vea vacía.
+           ========================================================================= */
+        const SAMPLE_DATA = [
+            { id: '1', title: 'Shingeki no Kyojin', originalTitle: 'Attack on Titan', category: 'anime', status: 'completado', score: 5, cover: 'https://cdn.myanimelist.net/images/anime/10/47347.jpg', specifics: { episode: 25, totalEpisodes: 25, studio: 'Wit Studio', season: 'Primavera 2013', format: 'Serie TV' } },
+            { id: '2', title: 'Elden Ring', originalTitle: '', category: 'videojuegos', status: 'progreso', score: 4.8, cover: 'https://image.api.playstation.com/vulcan/ap/rnd/202110/2000/aGhopp3MHppi7kooGE2Dtt8C.png', specifics: { platform: 'PC', hours: 45, developer: 'FromSoftware', genre: 'Action RPG' } },
+            { id: '3', title: 'Dune: Part Two', originalTitle: '', category: 'peliculas', status: 'completado', score: 4.5, cover: 'https://m.media-amazon.com/images/M/MV5BODdjMjM3NGQtZDA5OC00NGE4LWIyZDQtZjYwOGZlMTM5ZTQ1XkEyXkFqcGdeQXVyODE5NzE3OTE@._V1_FMjpg_UX1000_.jpg', specifics: { director: 'Denis Villeneuve', year: 2024, duration: '166', platform: 'Cine' } },
+            { id: '4', title: 'Berserk', originalTitle: '', category: 'manga', status: 'progreso', score: 5, cover: 'https://cdn.myanimelist.net/images/manga/1/157897.jpg', specifics: { author: 'Kentaro Miura', chapters: 364, publishStatus: 'En emisión', publisher: 'Hakusensha' } },
+            { id: '5', title: 'Breaking Bad', originalTitle: '', category: 'series', status: 'completado', score: 5, cover: 'https://m.media-amazon.com/images/M/MV5BYmQ4YWMxYjUtNjZmYi00MDQ1LWFjMzMtOTE0ZjBhYWJhN2NhXkEyXkFqcGdeQXVyMTMzNDExODE5._V1_.jpg', specifics: { season: 'Temporada 5', episode: 62, totalEpisodes: 62, platform: 'Netflix', network: 'AMC' } },
+            { id: '6', title: 'El Archivo de las Tormentas', originalTitle: 'The Way of Kings', category: 'libros', status: 'pendiente', score: 0, cover: 'https://m.media-amazon.com/images/I/91N-46w0M4L._AC_UF1000,1000_QL80_.jpg', specifics: { author: 'Brandon Sanderson', format: 'Físico' } },
+            { id: '7', title: 'Watchmen', originalTitle: '', category: 'comics', status: 'completado', score: 5, cover: 'https://m.media-amazon.com/images/I/71h3J24BfQL._AC_UF1000,1000_QL80_.jpg', specifics: { authors: 'Alan Moore, Dave Gibbons', format: 'Novela Gráfica', issues: 12, totalIssues: 12, publisher: 'DC Comics' } },
+            { id: '8', title: 'Mushoku Tensei', originalTitle: '', category: 'novelas_ligeras', status: 'progreso', score: 4.2, cover: 'https://cdn.myanimelist.net/images/manga/2/253982.jpg', specifics: { author: 'Rifujin na Magonote', volumes: 15, totalVolumes: 26, format: 'Físico', language: 'Español' } }
+        ];
+
+        // Módulo utilitario: Componente para renderizar Iconos fácilmente.
+        const Icon = ({ name, className = 'w-4 h-4' }) => {
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name, className]);
+            return <i data-lucide={name} class={`${className}`}></i>;
+        };
+
+
+        /* =========================================================================
+           MÓDULO 3: MODAL DE LOGIN / NUBE (Estilo MAL Register)
+           Esta es la ventana negra que se abre cuando le das a "Login / Nube".
+           Maneja tanto el iniciar sesión como mostrar el tutorial paso a paso.
+           ========================================================================= */
+        const CloudAuthModal = ({ onClose, onSave, config }) => {
+            // view = 'login' muestra el formulario. view = 'signup' muestra el tutorial.
+            const [view, setView] = useState('login'); 
+            const [apiKey, setApiKey] = useState(config?.apiKey || '');
+            const [binId, setBinId] = useState(config?.binId || '');
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                onSave({ apiKey, binId });
+            };
+
+            return (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/85 animate-fade-in overflow-y-auto">
+                    <div className="bg-[#2a2a2a] w-full max-w-md my-8 relative flex flex-col shadow-2xl rounded-sm">
+                        
+                        {/* Cabecera del Modal */}
+                        <div className="text-center pt-8 pb-4 relative">
+                            <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white"><Icon name="x"/></button>
+                            <h2 className="text-2xl font-bold text-white mb-2">
+                                {view === 'login' ? 'Conectar con la Nube' : 'Crear tu Base de Datos'}
+                            </h2>
+                            <p className="text-sm text-[#ababab] px-6">
+                                {view === 'login' 
+                                    ? 'Inicia sesión con tus credenciales de JSONBin para sincronizar tu lista en cualquier dispositivo. Es gratis.' 
+                                    : 'Aprende a crear tu espacio de almacenamiento gratuito paso a paso.'}
+                            </p>
+                        </div>
+
+                        {/* Cuerpo del Modal */}
+                        <div className="p-8 pt-4">
+                            {view === 'login' ? (
+                                // --- VISTA DE LOGIN ---
+                                <form onSubmit={handleSubmit} className="space-y-4">
+                                    <div className="border-t border-[#444] pt-4">
+                                        <label className="text-xs font-bold text-[#e5e5e5] block mb-1">Bin ID (ID del Casillero)</label>
+                                        <input 
+                                            type="text" required value={binId} onChange={e=>setBinId(e.target.value)}
+                                            className="w-full bg-[#111] border border-[#444] p-2.5 text-sm text-white focus:outline-none focus:border-mal-blue transition-colors"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-[#e5e5e5] block mb-1">Master API Key (Llave Maestra)</label>
+                                        <input 
+                                            type="password" required value={apiKey} onChange={e=>setApiKey(e.target.value)}
+                                            className="w-full bg-[#111] border border-[#444] p-2.5 text-sm text-white focus:outline-none focus:border-mal-blue transition-colors"
+                                        />
+                                    </div>
+                                    
+                                    <div className="pt-4">
+                                        <button type="submit" className="w-full bg-mal-blue hover:bg-mal-darkblue text-white font-bold py-3 text-sm transition-colors cursor-pointer text-center rounded-sm">
+                                            Iniciar Sesión (Login)
+                                        </button>
+                                        {/* Botón de desconectar (solo aparece si ya estás conectado) */}
+                                        {config && (
+                                            <button type="button" onClick={() => onSave(null, 'disconnect')} className="w-full bg-transparent border border-[#555] hover:bg-[#333] text-[#ababab] mt-3 font-bold py-2 text-xs transition-colors cursor-pointer text-center">
+                                                Desconectar / Cerrar Sesión
+                                            </button>
+                                        )}
+                                    </div>
+                                    
+                                    <div className="text-center pt-6 mt-2">
+                                        <p className="text-xs text-[#ababab] mb-2">¿No tienes cuenta ni llaves?</p>
+                                        <button type="button" onClick={()=>setView('signup')} className="w-full border border-gray-500 hover:bg-gray-800 text-white font-bold py-2 text-sm transition-colors rounded-sm">
+                                            Registrarse (Sign Up)
+                                        </button>
+                                    </div>
+                                </form>
+                            ) : (
+                                // --- VISTA DE TUTORIAL (SIGN UP) ---
+                                <div className="space-y-4 text-sm text-[#ababab] border-t border-[#444] pt-4">
+                                    <div className="bg-[#1e1e1e] p-4 border border-[#333] rounded-sm">
+                                        <h4 className="text-white font-bold mb-2 flex items-center gap-2">Paso 1: Crear cuenta gratis</h4>
+                                        <p className="text-xs">Entra a <a href="https://jsonbin.io/" target="_blank" className="text-mal-blue hover:underline font-bold">jsonbin.io</a> y haz clic en <strong>Sign Up</strong>. Regístrate usando tu cuenta de Google o Github.</p>
+                                    </div>
+                                    <div className="bg-[#1e1e1e] p-4 border border-[#333] rounded-sm">
+                                        <h4 className="text-white font-bold mb-2 flex items-center gap-2">Paso 2: Crear el Bin (Casillero)</h4>
+                                        <p className="text-xs">En el menú, haz clic en <strong>Create Bin</strong>. Borra lo que haya en el recuadro negro y pega esto tal cual:<br/>
+                                        <code className="block bg-black text-[#2db039] p-2 mt-2 text-center text-xs">{"{"}"inicio": true{"}"}</code><br/>
+                                        Haz clic en el botón verde <strong>Save</strong>. Copia el código alfanumérico que aparece en la URL del navegador al final (Ese es tu <strong>Bin ID</strong>).</p>
+                                    </div>
+                                    <div className="bg-[#1e1e1e] p-4 border border-[#333] rounded-sm">
+                                        <h4 className="text-white font-bold mb-2 flex items-center gap-2">Paso 3: Copiar Llave (API Key)</h4>
+                                        <p className="text-xs">En el menú izquierdo de JsonBin, ve a la sección <strong>API Keys</strong>. Verás un código largo (suele empezar con $2a$10...). Esa es tu <strong>Master API Key</strong>. Cópiala.</p>
+                                    </div>
+                                    <div className="text-center pt-4">
+                                        <button type="button" onClick={()=>setView('login')} className="w-full bg-mal-blue hover:bg-mal-darkblue text-white font-bold py-3 text-sm transition-colors rounded-sm">
+                                            ¡Ya los tengo! Volver al Login
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        {/* Footer del Modal */}
+                        <div className="bg-[#1e1e1e] p-4 text-center text-xs text-[#555] rounded-b-sm border-t border-[#333]">
+                            Tus datos se guardan directamente en tu navegador y tu servidor privado.
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        /* =========================================================================
+           MÓDULO 4: FORMULARIO DE EDICIÓN / AÑADIR (ADD ENTRY)
+           Esta pantalla aparece cuando quieres registrar un nuevo juego/anime/etc.
+           Cambia sus campos dependiendo de la categoría seleccionada.
+           ========================================================================= */
+        const ItemForm = ({ item, onSave, onCancel }) => {
+            // Variables de memoria (estado) para los campos del formulario
+            const [category, setCategory] = useState(item ? item.category : 'anime');
+            const [title, setTitle] = useState(item ? item.title : '');
+            const [originalTitle, setOriginalTitle] = useState(item ? item.originalTitle : '');
+            const [cover, setCover] = useState(item ? item.cover : '');
+            const [status, setStatus] = useState(item ? item.status : 'pendiente');
+            const [score, setScore] = useState(item ? item.score : 0);
+            const [notes, setNotes] = useState(item ? item.notes : '');
+            const [spec, setSpec] = useState(item?.specifics || {});
+
+            // Si cambiamos de categoría (ej. de Anime a Juego), vaciamos los campos específicos
+            useEffect(() => {
+                if (!item || item.category !== category) setSpec({});
+                else setSpec(item.specifics || {});
+            }, [category, item]);
+
+            // Función que se ejecuta al darle al botón "Guardar"
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (!title.trim()) return; // Exige que haya título
+                onSave({ id: item?.id, title, originalTitle, category, cover, status, score: Number(score), notes, specifics: spec });
+            };
+
+            // Trae los campos específicos de la categoría actual (Modulo 1)
+            const fields = CATEGORY_FIELDS[category] || [];
+
+            return (
+                <div className="max-w-4xl mx-auto my-6 bg-mal-panel border border-mal-border shadow-lg text-[#e5e5e5]">
+                    {/* Cabecera del formulario */}
+                    <div className="bg-mal-blue text-white p-2 px-3 font-bold text-sm flex items-center justify-between">
+                        <span>{item ? 'Editar Entrada' : 'Añadir Nueva Entrada'}</span>
+                        <button onClick={onCancel} className="hover:text-gray-300"><Icon name="x"/></button>
+                    </div>
+                    
+                    <form onSubmit={handleSubmit} className="p-6 space-y-6">
+                        
+                        {/* 1. Selector de Categoría */}
+                        <div>
+                            <label className="text-xs font-bold text-white mb-2 block border-b border-mal-border pb-1">Tipo de Contenido</label>
+                            <div className="flex flex-wrap gap-2 mt-3">
+                                {CATEGORIES.map(cat => (
+                                    <button type="button" key={cat.id} onClick={() => setCategory(cat.id)} 
+                                        className={`px-4 py-2 text-xs font-bold rounded-sm border transition-colors
+                                        ${category === cat.id ? 'bg-[#333] border-mal-blue text-white' : 'bg-transparent border-[#444] text-[#ababab] hover:border-[#666]'}`}>
+                                        {cat.name}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 2. Información General (Título, Portada) */}
+                        <div>
+                            <label className="text-xs font-bold text-white mb-2 block border-b border-mal-border pb-1">Información General</label>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                                <div><label className="text-xs text-[#888] block mb-1">Título *</label>
+                                <input type="text" required value={title} onChange={e=>setTitle(e.target.value)} className="w-full bg-[#111] border border-[#444] p-1.5 text-sm focus:border-mal-blue outline-none text-white" /></div>
+                                
+                                <div><label className="text-xs text-[#888] block mb-1">Título Original (Opcional)</label>
+                                <input type="text" value={originalTitle} onChange={e=>setOriginalTitle(e.target.value)} className="w-full bg-[#111] border border-[#444] p-1.5 text-sm focus:border-mal-blue outline-none text-white" /></div>
+                                
+                                <div className="md:col-span-2"><label className="text-xs text-[#888] block mb-1">URL de la Imagen (Portada)</label>
+                                <input type="url" value={cover} onChange={e=>setCover(e.target.value)} placeholder="Ej: https://misitio.com/imagen.jpg" className="w-full bg-[#111] border border-[#444] p-1.5 text-sm focus:border-mal-blue outline-none text-white" /></div>
+                            </div>
+                        </div>
+
+                        {/* 3. Indicadores Específicos (Dinámicos según categoría) */}
+                        {fields.length > 0 && (
+                            <div>
+                                <label className="text-xs font-bold text-white mb-2 block border-b border-mal-border pb-1">Detalles de {CATEGORIES.find(c=>c.id===category)?.name}</label>
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-3">
+                                    {fields.map(f => (
+                                        // Hace que campos como Director o Autor ocupen más espacio en pantalla
+                                        <div key={f.key} className={['developer', 'director', 'author', 'authors'].includes(f.key) ? 'col-span-2' : ''}>
+                                            <label className="text-xs text-[#888] block mb-1">{f.label}</label>
+                                            <input type={f.type} step={f.step} value={spec[f.key] || ''} onChange={e=>setSpec({...spec, [f.key]: e.target.value})} placeholder={f.placeholder} className="w-full bg-[#111] border border-[#444] p-1.5 text-sm focus:border-mal-blue outline-none text-white" />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 4. Estado y Puntuación */}
+                        <div>
+                            <label className="text-xs font-bold text-white mb-2 block border-b border-mal-border pb-1">Estado y Valoración</label>
+                            <div className="grid grid-cols-2 gap-4 mt-3">
+                                <div>
+                                    <label className="text-xs text-[#888] block mb-1">Estado actual</label>
+                                    <select value={status} onChange={e=>setStatus(e.target.value)} className="w-full bg-[#111] border border-[#444] p-1.5 text-sm focus:border-mal-blue outline-none text-white">
+                                        {STATUSES.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-xs text-[#888] block mb-1">Puntuación (0-5)</label>
+                                    <input type="number" min="0" max="5" step="0.1" value={score} onChange={e=>setScore(e.target.value)} className="w-full bg-[#111] border border-[#444] p-1.5 text-sm focus:border-mal-blue outline-none text-white" />
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="text-xs text-[#888] block mb-1">Notas / Reseña personal</label>
+                                    <textarea value={notes} onChange={e=>setNotes(e.target.value)} rows="4" className="w-full bg-[#111] border border-[#444] p-1.5 text-sm focus:border-mal-blue outline-none resize-none text-white"></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Botones Finales */}
+                        <div className="flex justify-end gap-2 pt-4 border-t border-[#333]">
+                            <button type="button" onClick={onCancel} className="px-6 py-2 bg-transparent hover:bg-[#333] text-white text-sm font-bold border border-[#555] rounded-sm transition-colors">Cancelar</button>
+                            <button type="submit" className="px-6 py-2 bg-mal-blue hover:bg-mal-darkblue text-white text-sm font-bold rounded-sm transition-colors">Guardar Entrada</button>
+                        </div>
+                    </form>
+                </div>
+            );
+        };
+
+        /* =========================================================================
+           MÓDULO 5: PANEL PRINCIPAL (DASHBOARD)
+           Esta es la vista estilo "Inicio" con las filas de portadas y los tops.
+           ========================================================================= */
+        const Dashboard = ({ items, onItemEdit }) => {
+            // Filtros para mostrar diferentes secciones
+            const inProgress = items.filter(i => i.status === 'progreso').slice(0, 10);
+            const recent = [...items].sort((a,b)=>b.id - a.id).slice(0, 10);
+            const topRated = [...items].filter(i=>i.score > 0).sort((a,b)=>b.score - a.score).slice(0, 10);
+
+            // Sub-componente: "Tarjetita" que muestra la portada de cada obra
+            const ItemCard = ({ item }) => (
+                <div onClick={() => onItemEdit(item)} className="w-[120px] shrink-0 group cursor-pointer">
+                    {/* Contenedor de la Imagen */}
+                    <div className="w-[120px] h-[170px] bg-black border border-[#333] overflow-hidden relative shadow-md">
+                        <img src={item.cover || `https://placehold.co/120x170/111/333?text=Sin+Imagen`} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                        {/* Etiqueta de Estado encima de la portada */}
+                        <div className={`absolute bottom-0 left-0 right-0 p-1 text-[10px] font-bold text-center text-white ${STATUSES.find(s=>s.id===item.status)?.color} opacity-90`}>
+                            {STATUSES.find(s=>s.id===item.status)?.name}
+                        </div>
+                    </div>
+                    {/* Título de la obra debajo */}
+                    <div className="mt-1.5 text-xs text-mal-blue font-bold group-hover:underline truncate" title={item.title}>{item.title}</div>
+                    <div className="text-[10px] text-[#888]">{CATEGORIES.find(c=>c.id===item.category)?.name}</div>
+                </div>
+            );
+
+            return (
+                <div className="flex flex-col lg:flex-row gap-4 max-w-[1060px] mx-auto w-full px-2 py-4">
+                    
+                    {/* COLUMNA IZQUIERDA (Contenido Principal) */}
+                    <div className="flex-1 space-y-6 min-w-0">
+                        {/* Mensaje de Bienvenida */}
+                        <div className="bg-mal-panel border border-mal-border p-3 flex justify-between items-center shadow-sm">
+                            <h2 className="text-white font-bold text-lg">¡Bienvenido a MiTrackList!</h2>
+                            <span className="text-xs text-[#888]">Tu catálogo personal unificado</span>
+                        </div>
+
+                        {/* Fila: Viendo/Jugando Actualmente */}
+                        {inProgress.length > 0 && (
+                            <div>
+                                <div className="bg-mal-panel border-b-2 border-mal-blue px-2 py-1.5 mb-2 flex justify-between items-end">
+                                    <h3 className="font-bold text-white text-sm">Viendo / Jugando Actualmente</h3>
+                                </div>
+                                <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+                                    {inProgress.map(item => <ItemCard key={item.id} item={item} />)}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Cuadrícula: Actualizados Recientemente */}
+                        <div>
+                            <div className="bg-mal-panel border-b-2 border-mal-blue px-2 py-1.5 mb-2 flex justify-between items-end">
+                                <h3 className="font-bold text-white text-sm">Actualizados Recientemente</h3>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4">
+                                {recent.map(item => <ItemCard key={item.id} item={item} />)}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* COLUMNA DERECHA (Barra lateral / Tops) */}
+                    <div className="w-full lg:w-[300px] shrink-0 space-y-6">
+                        
+                        {/* Caja 1: Estadísticas */}
+                        <div className="bg-mal-panel border border-mal-border shadow-sm">
+                            <div className="bg-[#2a2a2a] text-[#e5e5e5] text-xs font-bold p-2 border-b border-[#333]">Mis Estadísticas</div>
+                            <div className="p-3 text-xs space-y-2 text-[#ababab]">
+                                <div className="flex justify-between border-b border-[#333] pb-1"><span>Total de Entradas:</span> <span className="font-bold text-white">{items.length}</span></div>
+                                <div className="flex justify-between border-b border-[#333] pb-1"><span>Completados:</span> <span className="font-bold text-white">{items.filter(i=>i.status==='completado').length}</span></div>
+                                <div className="flex justify-between border-b border-[#333] pb-1">
+                                    <span>Nota Media:</span> 
+                                    <span className="font-bold text-yellow-500">{(items.reduce((acc, i) => acc + (i.score||0), 0) / (items.filter(i=>i.score>0).length || 1)).toFixed(2)} / 5</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Caja 2: Top Mejores Valorados */}
+                        <div className="bg-mal-panel border border-mal-border shadow-sm">
+                            <div className="bg-[#2a2a2a] text-[#e5e5e5] text-xs font-bold p-2 border-b border-[#333] flex justify-between">
+                                <span>Obras Mejor Valoradas</span>
+                            </div>
+                            <div className="p-2 space-y-2">
+                                {topRated.length === 0 ? <p className="text-xs text-[#666]">Aún no has valorado nada.</p> : topRated.map((item, idx) => (
+                                    <div key={item.id} className="flex gap-2 items-center text-xs group cursor-pointer bg-[#111] p-1 border border-[#222] hover:bg-[#222] transition-colors" onClick={() => onItemEdit(item)}>
+                                        {/* Número del TOP (Oro, Plata, Bronce) */}
+                                        <span className={`text-xs w-6 text-center font-bold 
+                                            ${idx === 0 ? 'text-yellow-400 text-lg' : idx === 1 ? 'text-gray-400 text-base' : idx === 2 ? 'text-amber-600 text-sm' : 'text-[#666]'}`}>
+                                            {idx + 1}
+                                        </span>
+                                        {/* Portada Miniatura */}
+                                        <div className="w-8 h-11 shrink-0 bg-black border border-[#333]"><img src={item.cover} className="w-full h-full object-cover" /></div>
+                                        {/* Título */}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-mal-blue font-bold group-hover:underline truncate">{item.title}</div>
+                                            <div className="text-[#888] text-[9px] uppercase">{CATEGORIES.find(c=>c.id===item.category)?.name}</div>
+                                        </div>
+                                        {/* Puntuación */}
+                                        <div className="font-bold text-[#e5e5e5] flex items-center gap-1 pr-1"><Icon name="star" className="w-3 h-3 text-yellow-500 fill-yellow-500"/>{item.score}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            );
+        };
+
+        /* =========================================================================
+           MÓDULO 6: VISTA DE LISTA (TABLA)
+           Muestra todo tu catálogo en formato de tabla (como un Excel).
+           ========================================================================= */
+        const MyList = ({ items, onItemEdit }) => {
+            const [filterCat, setFilterCat] = useState('all');
+            const filtered = filterCat === 'all' ? items : items.filter(i => i.category === filterCat);
+
+            return (
+                <div className="max-w-[1060px] mx-auto w-full px-2 py-4">
+                    {/* Botones para filtrar por categoría */}
+                    <div className="flex gap-2 mb-4 bg-mal-panel border border-mal-border p-2 overflow-x-auto text-xs shadow-sm">
+                        <button onClick={()=>setFilterCat('all')} className={`px-3 py-1 font-bold rounded-sm ${filterCat==='all' ? 'bg-mal-blue text-white' : 'text-mal-blue hover:underline'}`}>Todo</button>
+                        {CATEGORIES.map(cat => (
+                            <button key={cat.id} onClick={()=>setFilterCat(cat.id)} className={`px-3 py-1 font-bold rounded-sm whitespace-nowrap ${filterCat===cat.id ? 'bg-mal-blue text-white' : 'text-mal-blue hover:underline'}`}>
+                                {cat.name}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Tabla de Datos */}
+                    <div className="bg-mal-panel border border-mal-border shadow-sm overflow-x-auto">
+                        <table className="w-full text-xs text-left min-w-[600px]">
+                            <thead className="bg-mal-blue text-white">
+                                <tr>
+                                    <th className="p-2 w-10 text-center">#</th>
+                                    <th className="p-2 w-12">Portada</th>
+                                    <th className="p-2">Título</th>
+                                    <th className="p-2 w-24">Nota</th>
+                                    <th className="p-2 w-32">Tipo</th>
+                                    <th className="p-2 w-32">Progreso</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filtered.map((item, idx) => {
+                                    const statusObj = STATUSES.find(s=>s.id===item.status);
+                                    
+                                    // Lógica para mostrar el progreso correcto según la categoría
+                                    let progress = '-';
+                                    if(item.category === 'anime' || item.category === 'series') progress = `${item.specifics?.episode||0} / ${item.specifics?.totalEpisodes||'?'}`;
+                                    else if(item.category === 'manga' || item.category === 'comics') progress = `${item.specifics?.chapters || item.specifics?.issues || 0} cap`;
+                                    else if(item.category === 'novelas_ligeras') progress = `${item.specifics?.volumes||0} vol`;
+                                    else if(item.category === 'videojuegos') progress = `${item.specifics?.hours||0} hrs`;
+                                    else if(item.category === 'libros') progress = `${item.specifics?.pages||0} pag`;
+
+                                    return (
+                                        <tr key={item.id} onClick={()=>onItemEdit(item)} className="border-b border-[#333] hover:bg-[#2a2a2a] cursor-pointer group">
+                                            {/* Barrita de color del estado a la izquierda */}
+                                            <td className={`p-2 text-center text-[#888] font-bold border-l-4 border-l-transparent group-hover:${statusObj?.color.replace('bg-', 'border-l-')}`}>
+                                                {idx + 1}
+                                            </td>
+                                            <td className="p-2">
+                                                <div className="w-10 h-14 bg-black overflow-hidden border border-[#333]"><img src={item.cover} className="w-full h-full object-cover" /></div>
+                                            </td>
+                                            <td className="p-2">
+                                                <div className="font-bold text-mal-blue group-hover:underline text-sm">{item.title}</div>
+                                                <div className="text-[10px] text-[#888]">{item.originalTitle || '-'}</div>
+                                            </td>
+                                            <td className="p-2 font-bold text-white flex items-center h-14 gap-1">
+                                                {item.score > 0 ? <><Icon name="star" className="w-3 h-3 text-yellow-500 fill-yellow-500"/>{item.score}</> : '-'}
+                                            </td>
+                                            <td className="p-2 text-[#ababab]">{CATEGORIES.find(c=>c.id===item.category)?.name}</td>
+                                            <td className="p-2 text-[#ababab]">{progress}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        };
+
+        /* =========================================================================
+           MÓDULO 7: COMPONENTE PRINCIPAL (APP)
+           Este es el cerebro central. Une la barra superior, la lógica de nube
+           y decide qué pantalla (Dashboard, Lista o Formulario) mostrar.
+           ========================================================================= */
+        const App = () => {
+            // 1. ESTADOS PRINCIPALES
+            const [items, setItems] = useState([]); // Aquí se guardan todas tus obras
+            const [cloudConfig, setCloudConfig] = useState(() => JSON.parse(localStorage.getItem('miTrackList_cloud')) || null); // Credenciales Nube
+            const [syncStatus, setSyncStatus] = useState('idle'); // Estado de carga (Guardando...)
+            
+            const [view, setView] = useState('dashboard'); // Controla qué pantalla ves ('dashboard', 'list', 'form')
+            const [itemToEdit, setItemToEdit] = useState(null); // Obra que estás editando actualmente
+            const [showCloudLogin, setShowCloudLogin] = useState(false); // Muestra/Oculta la ventana negra de Login
+
+            const API_URL = 'https://api.jsonbin.io/v3/b'; // Dirección del servidor de la nube
+
+            // 2. EFECTO INICIAL (Al cargar la página por primera vez)
+            useEffect(() => {
+                // Buscamos si hay datos guardados localmente
+                const localData = localStorage.getItem('miTrackList_data');
+                let parsedLocal = [];
+                
+                if (localData) {
+                    try { parsedLocal = JSON.parse(localData); setItems(parsedLocal); } catch(e) {}
+                } else {
+                    // Si no hay datos (es tu primera vez) y no tienes nube, cargamos la muestra
+                    if (!cloudConfig) {
+                        setItems(SAMPLE_DATA);
+                        localStorage.setItem('miTrackList_data', JSON.stringify(SAMPLE_DATA));
+                    }
+                }
+                
+                // Si tienes la nube configurada, sincronizamos
+                if (cloudConfig) syncFromCloud(cloudConfig, parsedLocal.length > 0 ? parsedLocal : SAMPLE_DATA);
+                else setSyncStatus('off');
+            }, []);
+
+            // 3. FUNCIONES DE NUBE (Bajar datos)
+            const syncFromCloud = async (config, localItems = items) => {
+                setSyncStatus('syncing');
+                try {
+                    const res = await fetch(`${API_URL}/${config.binId}/latest`, { headers: { 'X-Master-Key': config.apiKey } });
+                    if (!res.ok) throw new Error('API Error');
+                    const data = await res.json();
+                    
+                    // Si el Bin es nuevo y tiene el {"inicio": true}, le subimos nuestros datos locales
+                    if (data.record && data.record.inicio === true && localItems.length > 0) {
+                        syncToCloud(config, localItems);
+                        return;
+                    }
+
+                    // Si trae datos reales (un arreglo), los aplicamos a la app
+                    if (data.record && Array.isArray(data.record)) {
+                        setItems(data.record);
+                        localStorage.setItem('miTrackList_data', JSON.stringify(data.record));
+                        setSyncStatus('success');
+                        setTimeout(() => setSyncStatus('idle'), 2000);
+                    } else if (localItems.length > 0) {
+                        syncToCloud(config, localItems); // Seguridad en caso de vacío
+                    }
+                } catch (e) {
+                    setSyncStatus('error');
+                }
+            };
+
+            // 4. FUNCIONES DE NUBE (Subir datos)
+            const syncToCloud = async (config, dataToSave) => {
+                setSyncStatus('syncing');
+                try {
+                    const res = await fetch(`${API_URL}/${config.binId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'X-Master-Key': config.apiKey },
+                        body: JSON.stringify(dataToSave)
+                    });
+                    if (!res.ok) throw new Error('API Error');
+                    setSyncStatus('success');
+                    setTimeout(() => setSyncStatus('idle'), 2000);
+                } catch (e) {
+                    setSyncStatus('error');
+                }
+            };
+
+            // 5. EVENTOS DE USUARIO
+            const handleCloudSetup = (config, action) => {
+                // Si el usuario decide cerrar sesión
+                if (action === 'disconnect') {
+                    setCloudConfig(null);
+                    localStorage.removeItem('miTrackList_cloud');
+                    setSyncStatus('off');
+                    setShowCloudLogin(false);
+                    return;
+                }
+                // Si el usuario Inicia sesión correctamente
+                setCloudConfig(config);
+                localStorage.setItem('miTrackList_cloud', JSON.stringify(config));
+                syncFromCloud(config, items);
+                setShowCloudLogin(false);
+            };
+
+            const handleSaveItem = (itemData) => {
+                let newItems;
+                // Si tiene ID, actualiza el existente. Si no, crea uno nuevo.
+                if (itemData.id) newItems = items.map(i => i.id === itemData.id ? itemData : i);
+                else newItems = [{ ...itemData, id: Date.now().toString() }, ...items];
+                
+                setItems(newItems);
+                localStorage.setItem('miTrackList_data', JSON.stringify(newItems)); // Guarda local
+                if (cloudConfig) syncToCloud(cloudConfig, newItems); // Sube a la nube
+                setView('dashboard'); // Vuelve al inicio
+            };
+
+            const handleDeleteItem = (id) => {
+                if(!window.confirm("¿Seguro que quieres eliminar esta entrada por completo?")) return;
+                const newItems = items.filter(i => i.id !== id);
+                setItems(newItems);
+                localStorage.setItem('miTrackList_data', JSON.stringify(newItems));
+                if (cloudConfig) syncToCloud(cloudConfig, newItems);
+                setView('dashboard');
+            };
+
+            // 6. RENDERIZADO VISUAL
+            return (
+                <div className="flex flex-col min-h-screen">
+                    
+                    {/* BARRA SUPERIOR (HEADER) - Azul MAL */}
+                    <header className="bg-mal-blue border-b border-[#1c3166] text-white shadow-md z-10 relative">
+                        <div className="max-w-[1060px] mx-auto flex items-center justify-between px-2 h-[50px]">
+                            <div className="flex items-center gap-6">
+                                {/* LOGO */}
+                                <h1 className="text-2xl font-bold italic tracking-tighter cursor-pointer drop-shadow-md" onClick={()=>setView('dashboard')}>
+                                    MiTrackList<span className="text-xs font-normal align-top">.net</span>
+                                </h1>
+                                {/* NAVEGACIÓN PRINCIPAL */}
+                                <nav className="hidden sm:flex items-center gap-5 text-[13px] font-bold mt-1">
+                                    <button onClick={()=>setView('dashboard')} className={`hover:text-gray-300 ${view==='dashboard'?'underline':''}`}>Inicio</button>
+                                    <button onClick={()=>setView('list')} className={`hover:text-gray-300 ${view==='list'?'underline':''}`}>Mi Lista</button>
+                                    <button onClick={()=>{setItemToEdit(null); setView('form');}} className={`hover:text-gray-300 ${view==='form'?'underline':''}`}>Añadir Entrada</button>
+                                </nav>
+                            </div>
+                            
+                            {/* ESTADO DE NUBE Y BOTÓN LOGIN */}
+                            <div className="flex items-center gap-3">
+                                <span className="text-[10px] hidden sm:block uppercase font-bold text-blue-200 w-24 text-right">
+                                    {syncStatus === 'syncing' ? 'Sincronizando...' : syncStatus === 'error' ? 'Error Nube' : syncStatus === 'success' ? 'Guardado ✓' : ''}
+                                </span>
+                                <button onClick={() => setShowCloudLogin(true)} className="bg-[#1c3166] border border-[#15254d] hover:bg-[#15254d] px-4 py-1.5 rounded-sm text-xs font-bold transition-colors shadow-inner">
+                                    {cloudConfig ? 'Usuario Conectado' : 'Login / Registro'}
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* SUB-BARRA DE CATEGORÍAS (Para accesos rápidos) */}
+                    <div className="bg-[#2a2a2a] text-[#ababab] hidden sm:block shadow-sm border-b border-[#333]">
+                        <div className="max-w-[1060px] mx-auto flex px-2 text-[11px] font-bold">
+                            <button onClick={()=>setView('dashboard')} className="py-1.5 px-3 hover:bg-[#333] hover:text-white text-center border-r border-[#444]">Todo</button>
+                            {CATEGORIES.slice(0, 5).map(c => (
+                                <button key={c.id} onClick={()=>setView('list')} className="py-1.5 px-3 hover:bg-[#333] hover:text-white text-center border-r border-[#444]">{c.name}</button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* MENÚ PARA MÓVILES (Abajo o simplificado) */}
+                    <div className="sm:hidden bg-[#1c3166] text-white flex justify-around text-xs font-bold py-2 shadow-md">
+                        <button onClick={()=>setView('dashboard')}>Inicio</button>
+                        <button onClick={()=>setView('list')}>Mi Lista</button>
+                        <button onClick={()=>{setItemToEdit(null); setView('form');}}>Añadir</button>
+                    </div>
+
+                    {/* CONTENIDO CENTRAL (Aquí cambia según el botón que toques) */}
+                    <main className="flex-1 bg-mal-bg py-2">
+                        {view === 'form' ? (
+                            <ItemForm 
+                                item={itemToEdit} 
+                                onSave={handleSaveItem} 
+                                onCancel={() => setView('dashboard')} 
+                            />
+                        ) : view === 'list' ? (
+                            <MyList items={items} onItemEdit={(item) => { setItemToEdit(item); setView('form'); }} />
+                        ) : (
+                            <Dashboard items={items} onItemEdit={(item) => { setItemToEdit(item); setView('form'); }} />
+                        )}
+
+                        {/* BOTÓN PELIGROSO: Eliminar entrada (Solo sale si estás editando algo existente) */}
+                        {view === 'form' && itemToEdit && (
+                            <div className="max-w-4xl mx-auto mt-2 mb-6 text-right px-2">
+                                <button onClick={() => handleDeleteItem(itemToEdit.id)} className="text-[11px] text-[#a12f31] hover:underline font-bold">Eliminar esta entrada permanentemente</button>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* PIE DE PÁGINA (FOOTER) */}
+                    <footer className="bg-mal-blue text-white mt-auto border-t-4 border-[#1c3166]">
+                        <div className="max-w-[1060px] mx-auto px-2 py-6 text-center text-xs">
+                            <p className="font-bold mb-2">MiTrackList.net es tu catálogo personal universal.</p>
+                            <p className="text-[#a5bceb]">© 2026 MiTrackList. Todos los derechos reservados.</p>
+                        </div>
+                    </footer>
+
+                    {/* VENTANAS EMERGENTES (Modales) */}
+                    {showCloudLogin && <CloudAuthModal config={cloudConfig} onClose={() => setShowCloudLogin(false)} onSave={handleCloudSetup} />}
+                </div>
+            );
+        };
+
+        // INICIALIZADOR DE REACT (No tocar)
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
